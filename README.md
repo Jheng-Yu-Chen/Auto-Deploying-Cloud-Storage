@@ -13,7 +13,7 @@ Auto-Deploying-Cloud-Storage
 #自動佈署方式
 
 #Step 1. 準備伺服器
-準備好1台或3台以上的伺服器，設定好IP讓伺服器之間能連線。
+準備1台或3台以上的伺服器，設定好IP讓伺服器之間能連線。
 
 #Step 2. 修改config/hosts
 將要佈署的伺服器IP加入到此清單，執行此Script的伺服器IP也必需在清單內。
