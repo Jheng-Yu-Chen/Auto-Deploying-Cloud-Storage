@@ -48,4 +48,4 @@ mysql_pwd='owncloud'
 切換到與deploy.sh相同的目錄，並執行指令 # sh deploy.sh 。
 
 #Step 5. 進入ownCloud設定網頁
-在網址列輸入http://IP.address/owncloud，若http_port設定443則在網址列輸入https://IP.address/owncloud。
+在網址列輸入 http://IP.address/owncloud ，若http_port設定443則在網址列輸入 https://IP.address/owncloud 。
