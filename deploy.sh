@@ -6,8 +6,6 @@ mkdir -p tmp
 source ./config/config
 source ./script/functions
 
-chmod a+x script/* &> /dev/null
-
 #判斷config/hosts檔裡的IP是否為1或3個以上
 if [ $total_hosts -eq 0 ] || [ $total_hosts -eq 2 ]; then
 	echo "至少要1台或3台以上的主機!" | tee -a deploy.log
