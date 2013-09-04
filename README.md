@@ -7,8 +7,10 @@ Auto-Deploying-Cloud-Storage
 
 
 
-#自動佈署方式
 #注意: 執行這個Script會將MySQL、Apache的設定與目錄清空，若有資料請先備份!
+
+
+#自動佈署方式
 
 #Step 1. 準備伺服器
 準備好1台或3台以上的伺服器，設定好IP讓伺服器之間能連線。
@@ -20,7 +22,9 @@ Auto-Deploying-Cloud-Storage
 主要修改下列的設定:
 
 yes : 啟動防火牆
+
 no : 不啟動防火牆
+
 firewall=yes
 
 位於此網段的主機才能存取MySQL與DFS, 例如: 192.168.5.0/24
