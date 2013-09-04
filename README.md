@@ -31,7 +31,7 @@ firewall=yes
 network_segment=192.168.5.0/24
 
 
-設定是否自動調整校能(測試中)，設定值: yes / no。
+設定是否自動調整效能(測試中)，設定值: yes / no。
 
 perf_tuning=no
 
