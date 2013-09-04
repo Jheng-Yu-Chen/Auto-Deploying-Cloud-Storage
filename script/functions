@@ -1,0 +1,194 @@
+#!/bin/bash
+
+#取得所有hosts的IP, 並排除"#"
+hosts=`cat ./config/hosts | grep -v "#"`
+for num in $hosts
+do
+	total_hosts=`expr $total_hosts + 1`
+done
+
+function remote_cmd(){
+	host=$1
+	command=$2
+	ssh -nq -p ${ssh_port} ${USER}@${host} "${command}" 2>>deploy.log
+	if [ $? -eq 0 ]; then
+		return 0
+	else
+		echo "${host} 執行失敗 ssh -nq -p ${ssh_port} ${USER}@${host} "${command}" ..... " >> deploy.log
+		return 1
+	fi
+
+}
+
+#檢查host的連線
+function ping_host(){
+	for host in $hosts
+	do
+		echo -n "正在嘗試Ping '${host}' ..... " | tee -a deploy.log
+		ping -c 4 -t 255 $host > /dev/null 2>>deploy.log
+		check_status -t "無法與'${host}'建立連線，請檢查您的網路設定!" || exit 1
+	done
+}
+
+#檢查能否與host建立ssh連線，若能則將host加入known_hosts裡
+function check_ssh(){
+	for host in $hosts
+	do
+		mkdir -p  ${HOME}/.ssh 2>>deploy.log
+		echo -n "正在將'${host}'加入known_host .....  " | tee -a deploy.log
+		ssh-keyscan -t rsa -p ${ssh_port} ${host} >> ${HOME}/.ssh/known_hosts 2>>deploy.log
+		check_status
+	done
+}
+
+#測試能否不用輸入密碼登入
+function test_sshnopwd(){
+	for host in $hosts
+	do
+		echo -n "正在嘗試SSH到 ${host} ..... " | tee -a deploy.log
+		ssh -o NumberOfPasswordPrompts=0 ${USER}@${host} -p ${ssh_port} "echo test_sshnopwd > /dev/null" 2>>deploy.log
+		check_status -t "請檢查'${host}'的SSH連線!" || exit 1
+	done
+}
+
+#文字的顏色，用法font_color -sf --color [red|green] --text [要顯示的文字]
+#-s : [OK]
+#-f : [FAILED]
+function font_color(){
+	if [ $# == 1 ]; then
+		if [ $1 == "-s" ]; then
+			echo -e "[" "\033[32m"OK"\033[0m" "]"
+		fi
+		if [ $1 == "-f" ]; then
+	                echo -e "[" "\033[31m"FAILED"\033[0m" "]"
+		fi
+	fi
+
+	while [ $# -gt 0 ]
+	do
+	        case $1 in
+	        --color)
+	                color=$2
+	                shift
+	                ;;
+	        --text)
+	                text=$2
+	                shift
+	                ;;
+	        esac
+	        shift
+	done
+
+	case $color in
+	        red)
+	                echo -e "\033[31m${text}\033[0m"
+	                ;;
+	        green)
+	                echo -e "\033[32m${text}\033[0m"
+			;;
+	esac
+}
+
+check_iptables(){
+	for host in $hosts
+	do
+		echo -n "正在停用${host}的防火牆 ..... " | tee -a deploy.log
+		remote_cmd ${host} "service iptables stop" >/dev/null
+		check_status
+	done
+}
+
+#
+check_selinux(){
+	for host in $hosts
+	do
+		echo -n "正在檢查${host}的SELinux設定 ..... " | tee -a deploy.log
+		result=`remote_cmd $host "grep 'SELINUX=' /etc/selinux/config | grep -v '#' | cut -d '=' -f 2"`
+		if [ "disabled" == "$result" ]; then
+			font_color -s
+			echo "[ OK ]" >> deploy.log
+		else
+			font_color -f
+			echo "[ FAILED ]" >> deploy.log
+			echo -n "正在變更${host}的SELinux設定為disabled ..... " | tee -a deploy.log
+			remote_cmd ${host} "sed -i.bak 's/SELINUX=${result}/SELINUX=disabled/g' /etc/selinux/config"
+			check_status 
+
+			echo -n "正在設定${host}的setenforce為disabled ..... " | tee -a deploy.log
+			remote_cmd ${host} "echo '0' | tee /selinux/enforce" > /dev/null
+			check_status 
+		fi
+	done
+}
+
+check_os(){
+	for host in $hosts
+	do
+		echo -n "正在檢查${host}的作業系統版本 ..... " | tee -a deploy.log
+		os=`remote_cmd ${host} "uname -r | grep el6"`
+		check_status -t  "${host}的作業系統版本不符合!" || exit 1
+	done
+}
+
+
+check_status(){
+	status=$?
+	while [ $# -gt 0 ]
+        do
+                case $1 in
+                "-t")
+                        text=$2
+                        shift
+                        ;;
+                esac
+                shift
+        done
+
+	if [ "$status" -eq 0 ]; then
+       	        font_color -s
+		echo "[ OK ]" >> deploy.log
+       	        return 0
+       	else
+       	        font_color -f
+		echo "[ FAILED ]" >> deploy.log
+		echo "$text" | tee -a deploy.log
+       	        return 1
+       	fi
+
+}
+
+
+#Usage: kill_process "keyword" "host IP"
+kill_process(){
+	var1=$1
+	host=$2
+       	pid=`ssh -nq -p "$ssh_port" "$deploy_user"@"$host" netstat -tunlp | grep "$var1" | awk '{print "\\t" \$7}' | cut -d'/' -f1 | uniq`
+       	if [ "$pid" ]; then
+       	        for id in $pid
+       	        do
+       	                echo -n "正在${host}刪除${var1}的Process:${id} ..... " | tee -a deploy.log
+       	                remote_cmd "$host" "kill -9 $id"
+       	                check_status
+       	        done
+       	fi
+}
+
+#Usage: del_line "keyword" "file full path" "host IP"
+del_line(){
+	var1=$1
+	file=$2
+	host=$3
+	chk=1	
+
+	while [ $chk -eq 1 ]
+	do
+		line_num=`ssh -nq -p "$ssh_port" "$deploy_user"@"$host" cat -n "$file" | grep "$var1" | awk '{ print \$1 }' | head -1`
+		if [ "$line_num" ]; then
+			echo -n "正在${host}刪除${file}的第${line_num}行 ..... " | tee -a deploy.log
+			remote_cmd "$host" "sed -i.bak "${line_num}d" "$file""
+        	        check_status
+		else
+			chk=0
+		fi
+	done
+}

@@ -1,0 +1,198 @@
+#!/bin/bash
+
+source ./config/config
+source ./script/functions
+
+retry=5
+wsrep_urls=""
+for host in $hosts
+do
+        wsrep_urls="${wsrep_urls}gcomm://${host}:4567,"
+done
+wsrep_urls="${wsrep_urls}gcomm://"
+
+
+for host in $hosts
+do
+	#remote_cmd "$host" "rpm -qa | grep 'mysql*' > /dev/null"
+	#if [ $? -eq 0 ]; then
+		echo -n "正在${host}停止MySQL ..... " | tee -a deploy.log
+		remote_cmd "$host" "/etc/init.d/mysql stop > /dev/null"
+		check_status
+
+		kill_process "mysqld" "$host"
+	
+		#echo  -n "正在${host}刪除套件percona* Percona* ..... " | tee -a deploy.log
+		#remote_cmd "$host" "yum remove -y percona* Percona* --setopt=sslverify=false"
+	        #check_status
+	
+		echo  -n "正在${host}刪除套件mysql* ..... " | tee -a deploy.log
+		remote_cmd "$host" "yum remove -y  mysql* --setopt=sslverify=false"
+	        check_status
+
+	#fi
+done
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}安裝percona-release ..... " | tee -a deploy.log
+	remote_cmd "$host" "rpm -q percona-release > /dev/null"
+	if [ $? -eq 0 ]; then
+		font_color -s
+	else
+		remote_cmd "$host" "yum localinstall -y ${percona_rpm} --setopt=sslverify=false" 
+       		check_status || exit 1
+	fi
+
+done
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}安裝Percona-Galera套件 ..... " | tee -a deploy.log
+	remote_cmd "$host" "yum install -y Percona-XtraDB-Cluster-server Percona-XtraDB-Cluster-client --setopt=sslverify=false"
+	check_status || exit 1
+done
+
+echo ""
+echo -n "正在產生/etc/my.cnf檔 ..... " | tee -a deploy.log
+if [ ! "$total_mem" ] || [ $total_mem -lt 1800 ]; then
+	cp -a ./config/service_configs/my.cnf.1 tmp/my.cnf > /dev/null 2>>deploy.log
+	check_status || exit 1
+else
+	cp -a ./config/service_configs/my.cnf.2 tmp/my.cnf > /dev/null 2>>deploy.log
+	check_status || exit 1
+	
+fi
+
+echo -n "修改port為${mysql_port} ..... " | tee -a deploy.log
+sed -i.bak "s#port=#port=${mysql_port}#g"  tmp/my.cnf 2>> deploy.log
+check_status || exit 1
+
+echo -n "修改wsrep_urls為${wsrep_urls} ..... " | tee -a deploy.log
+echo "wsrep_urls=\"${wsrep_urls}\"" >> tmp/my.cnf  2>> deploy.log
+check_status || exit 1
+
+if [ "$perf_tuning" == "yes" ]; then
+	source ./tmp/tuning_info
+	echo -n "正在計算innodb_buffer_pool_size容量 ..... " | tee -a deploy.log
+	if [ $total_mem -lt 1800 ]; then
+		size=`echo "${avail_mem} - 180" | bc | cut -d'.' -f1`
+		if [ $size -lt 64 ]; then
+			size=64
+		fi
+	else
+		size=`echo "${avail_mem} - 350" | bc | cut -d'.' -f1`
+		if [ $size -lt 64 ]; then
+			size=64
+		elif [ $size -gt 65535 ]; then
+			size=65535
+		fi
+	fi
+	check_status || exit 1
+
+	var=`cat -n tmp/my.cnf | grep 'innodb_buffer_pool_size' | awk '{ print $1 }'`
+	echo -n "正在修改innodb_buffer_pool_size為${size}M ..... " | tee -a deploy.log
+	sed -i.bak "${var}c innodb_buffer_pool_size=${size}M" tmp/my.cnf 2>> deploy.log 
+	check_status || exit 1
+
+	var=`cat -n tmp/my.cnf | grep 'wsrep_provider_options' | awk '{ print $1 }'`
+	size=`echo "${disk_size} * 0.1" | bc | cut -d'.' -f1`
+	echo -n "正在修改gcache.size為${size}M ..... " | tee -a deploy.log
+	sed -i.bak "${var}c wsrep_provider_options=\"gcache.size=${size}M\"" tmp/my.cnf 2>> deploy.log 
+	check_status || exit 1
+
+	var=`cat -n tmp/my.cnf | grep 'wsrep_slave_threads' | awk '{ print $1 }'`
+	size=`echo "${cpu_core} * 2" | bc | cut -d'.' -f1`
+	echo -n "正在修改wsrep_slave_threads為${size} ..... " | tee -a deploy.log
+	sed -i.bak "${var}c wsrep_slave_threads=${size}" tmp/my.cnf 2>> deploy.log 
+	check_status || exit 1
+fi
+
+for host in $hosts
+do
+	echo -n "正在將my.cnf佈署到${host} ..... " | tee -a deploy.log
+	scp -P "$ssh_port" tmp/my.cnf "$deploy_user"@"$host":/etc > /dev/null 2>> deploy.log
+	check_status || exit 1
+done
+
+for host in $hosts
+do
+	echo -n "修改${host}的wsrep_node_address ..... " | tee -a deploy.log
+	remote_cmd "$host" "sed -i.bak 's#wsrep_node_address=#wsrep_node_address=${host}#g'  /etc/my.cnf"
+	check_status || exit 1
+done
+
+for host in $hosts
+do
+	echo""
+	echo -n "正在${host}刪除/var/lib/mysql ..... " | tee -a deploy.log
+	remote_cmd "$host" "rm -rf /var/lib/mysql"
+	check_status
+	
+	echo -n "正在${host}執行mysql_install_db ..... " | tee -a deploy.log
+	remote_cmd "$host" "mysql_install_db" > /dev/null
+	check_status
+	
+	echo -n "正在${host}修改/var/lib/mysql的Owner與Group ..... " | tee -a deploy.log
+	remote_cmd "$host" "chown -R mysql:mysql /var/lib/mysql/"
+	check_status
+	
+	echo -n "正在${host}修改/var/lib/mysql的權限為755 ..... " | tee -a deploy.log
+	remote_cmd "$host" "chmod 755 /var/lib/mysql/"
+	check_status
+done
+
+echo ""
+for host in $hosts
+do
+	chk=1
+	echo -n "正在${host}啟動Galera Daemon ..... " | tee -a deploy.log
+	for (( i=1; i<="$retry"; i=i+1 ))
+	do
+		remote_cmd "$host" "/etc/init.d/mysql start > /dev/null"
+		if [ $? -eq 0 ]; then
+			break
+		else
+			sleep 3
+		fi
+	done
+        remote_cmd "$host" "netstat -tunlp | grep mysqld > /dev/null"
+        check_status || exit 1
+
+	while [ "$chk" -eq 1 ]
+	do
+		echo -n "等待${host}同步資料庫資料 ..... "
+		remote_cmd "$host" "mysql -u root -e \"show status like 'wsrep_%'\" | grep \"Synced\" > /dev/null"
+		if [ $? -eq 0 ]; then
+			chk=0
+			font_color -s
+		else
+			sleep 5
+			echo ""
+		fi
+	done
+done
+
+echo ""
+echo -n "設定MySQL root 密碼 ..... " | tee -a deploy.log
+mysqladmin -u root password "$mysql_pwd" 2>>deploy.log
+check_status || exit 1
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}設定開機自動啟動MySQL ..... " | tee -a deploy.log
+	remote_cmd "$host" "chkconfig mysql on"
+	check_status || exit 1
+done
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}檢查MySQL狀態 ..... " | tee -a deploy.log
+	remote_cmd "$host" "mysql -u root -p\"$mysql_pwd\" -e \"show status like 'wsrep_%'\" | grep \"Synced\" > /dev/null"
+	check_status || exit 1
+done
+echo ""

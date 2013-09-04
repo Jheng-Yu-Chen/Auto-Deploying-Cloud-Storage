@@ -1,0 +1,161 @@
+#!/bin/bash
+
+source ./config/config
+source ./script/functions
+
+retry=5
+vol_nodes=""
+#將hosts的IP轉成指令能接受的格式
+for host in $hosts
+do
+	vol_nodes=${vol_nodes}\ ${host}:${gfs_dir}
+	cluster_size=`expr ${cluster_size} + 1`
+	var=`ifconfig | grep "$host"`
+	if [ "$var" ]; then
+		deploy_host="$host"
+	fi
+done
+
+if [ "$var" ]; then
+	nodes=`cat ./config/hosts | grep -v "#" | grep -v "$deploy_host"`
+else
+	nodes=`cat ./config/hosts | grep -v "#"`
+fi
+
+###刪除gluster相關套件、資料夾與設定
+for host in $hosts
+do
+	remote_cmd "$host" "rpm -q glusterfs-server > /dev/null"
+	if [ $? -eq 0 ]; then
+		remote_cmd "$host" "mount | grep ${http_dir}/${owncloud_dir} > /dev/null"
+		if [ $? -eq 0 ]; then
+			echo -n "正在${host} unmount ${http_dir}/${owncloud_dir}資料夾 ..... " | tee -a deploy.log
+			remote_cmd "$host" "umount -f localhost:/${gfs_volume}" > /dev/null
+			check_status
+		fi
+			
+		echo -n "正在${host}停止glusterd ..... " | tee -a deploy.log
+		remote_cmd "$host" "service glusterd stop" > /dev/null 
+		check_status
+		
+		kill_process "gluster" "$host"
+		
+		echo -n "正在${host}刪除${gfs_dir} ..... " | tee -a deploy.log
+		remote_cmd "$host" "rm -rf ${gfs_dir}"> /dev/null
+		check_status
+
+		echo -n "正在${host}刪除/var/lib/glusterd ..... " | tee -a deploy.log
+		remote_cmd "$host" "rm -rf /var/lib/glusterd"
+		check_status
+		
+		del_line "glusterfs" "/etc/fstab" "$host"
+		
+#		echo -n "正在${host}移除GlusterFS ..... " | tee -a deploy.log
+#		remote_cmd "$host" "yum remove glusterfs* -y --setopt=sslverify=false"
+#		check_status
+
+	fi
+done
+
+echo ""
+echo "準備安裝GlusterFS所需的套件(glusterfs-server):" | tee -a deploy.log
+for host in $hosts
+do
+        echo ""
+        echo "正在${host}執行指令:'yum -y install glusterfs-server --setopt=sslverify=false' ..... " | tee -a deploy.log
+        sleep 1
+        remote_cmd "$host" "yum -y install glusterfs-server --setopt=sslverify=false"
+	check_status || exit 1
+done
+
+
+
+#啟動GlusterFS的Daemon
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}啟動GlusterFS daemon ..... " | tee -a deploy.log
+
+	for (( i=1; i<="$retry"; i=i+1 ))
+	do
+        	remote_cmd "$host" "/etc/init.d/glusterd start" > /dev/null
+		remote_cmd "$host" "netstat -tunlp | grep glusterd" > /dev/null
+		if [ $? -eq 0 ]; then
+			break
+		else
+			sleep 3
+		fi
+	done
+	remote_cmd "$host" "netstat -tunlp | grep glusterd" > /dev/null
+	check_status || exit 1
+done
+
+
+#加入Peer list
+echo ""
+for host in $nodes
+do
+	echo -n "正在將${host}加入Peer list ..... " | tee -a deploy.log
+	gluster peer probe "$host" > /dev/null 2>>deploy.log
+	check_status || exit 1
+done
+
+echo ""
+if [ $gfs_mode == "distribute" ]; then
+	echo -n "正在建立Gluster Volumn, 模式:'distribute' ..... " | tee -a deploy.log
+	gluster volume create "$gfs_volume" transport tcp ${vol_nodes} > /dev/null 2>>deploy.log
+	check_status || exit 1
+else
+	echo -n "正在建立Gluster Volumn, 模式:'${gfs_mode}' ..... " | tee -a deploy.log
+	gluster volume create "$gfs_volume" "$gfs_mode" "$cluster_size" transport tcp ${vol_nodes} > /dev/null 2>>deploy.log
+	check_status || exit 1
+fi
+
+echo ""
+echo -n "正在啟動GlusterFS Volume: $gfs_volume ..... " | tee -a deploy.log
+gluster volume start "$gfs_volume" > /dev/null 2>> deploy.log
+check_status || exit 1
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}掛載${gfs_volume} Volume到${http_dir}/${owncloud_dir}資料夾 ..... " | tee -a deploy.log
+	remote_cmd "$host" "mkdir -p ${http_dir}/${owncloud_dir} && mount.glusterfs localhost:/${gfs_volume} ${http_dir}/${owncloud_dir}"
+	check_status -t "請檢查有無使用者位於${http_dir}/${owncloud_dir}資料夾，造成卸載與掛載失敗!" || exit 1
+done
+
+if [ "$perf_tuning" == "yes" ]; then
+	source ./tmp/tuning_info
+	echo ""
+	size=`echo "${avail_mem} * 0.8" | bc | cut -d'.' -f1`
+	echo -n "正在設定Glusterfs的performance.cache-size為${size}MB ..... " | tee -a deploy.log
+	gluster volume set "$gfs_volume" performance.cache-size ${size}MB > /dev/null 2>> deploy.log
+	check_status || exit 1
+fi
+
+echo ""
+fstab="localhost:/${gfs_volume}  ${http_dir}/${owncloud_dir} glusterfs defaults,_netdev 0 0"
+for host in $hosts
+do
+        echo -n "正在${host}設定開機自動掛載Gluterfs ..... " | tee -a deploy.log
+       	remote_cmd "$host" "echo ${fstab} | tee -a /etc/fstab" > /dev/null
+	check_status || exit 1
+done
+
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}設定開機自動啟動glusterfsd ..... " | tee -a deploy.log
+	remote_cmd "$host" "chkconfig glusterd on"
+	check_status || exit 1
+done
+
+#檢查Mount
+echo ""
+for host in $hosts
+do
+	echo -n "正在${host}檢查Mount狀態 ..... " | tee -a deploy.log
+	remote_cmd "$host" "mount | grep localhost:/${gfs_volume}" > /dev/null
+	check_status || exit 1
+done
+echo ""

@@ -1,0 +1,83 @@
+#/bin/bash
+
+source ./config/config
+source ./script/functions
+
+if [ "$firewall" == "yes" ]; then 
+	echo "正在設定防火牆規則:" | tee -a deploy.log
+	
+	echo "*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:ADCS - [0:0]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -p icmp -j ACCEPT
+-A INPUT -i lo -j ACCEPT" | tee tmp/iptables | tee -a deploy.log
+	
+	chk=`rpm -q 'httpd'`
+	if [ "$chk" ]; then
+	
+	echo "-A INPUT -p tcp -m state --state NEW -m tcp --dport ${http_port} -j ACCEPT" | tee -a tmp/iptables | tee -a deploy.log
+	
+	fi
+	
+	echo "-A INPUT -p all --source ${network_segment} --destination ${network_segment} -j ADCS
+-A INPUT -p tcp -m state --state NEW -m tcp --dport ${ssh_port} -j ACCEPT
+-A INPUT -j REJECT --reject-with icmp-host-prohibited
+-A FORWARD -j REJECT --reject-with icmp-host-prohibited" | tee -a tmp/iptables | tee -a deploy.log
+	
+	chk=`rpm -q 'glusterfs-server'`
+	if [ "$chk" ]; then
+	
+	echo "-A ADCS -p tcp -m state --state NEW -m tcp --dport 24007:24047 -j ACCEPT
+-A ADCS -p tcp -m state --state NEW -m tcp --dport 111 -j ACCEPT
+-A ADCS -p udp -m state --state NEW -m udp --dport 111 -j ACCEPT
+-A ADCS -p tcp -m state --state NEW -m tcp --dport 38465:38467 -j ACCEPT" | tee -a tmp/iptables | tee -a deploy.log
+
+	fi
+	
+	chk=`rpm -q 'Percona-XtraDB-Cluster-galera'`
+	if [ "$chk" ]; then
+	
+	echo "-A ADCS -p tcp -m tcp --dport 4567 -j ACCEPT
+-A ADCS -p tcp -m tcp --dport ${mysql_port} -j ACCEPT" | tee -a tmp/iptables | tee -a deploy.log
+	
+	fi
+	
+	echo 'COMMIT' | tee -a tmp/iptables | tee -a deploy.log
+	
+	echo ""
+	for host in $hosts
+	do
+		echo -n "正在將防火牆規則佈署到${host} ..... " | tee -a deploy.log
+		scp -P "$ssh_port" tmp/iptables "$host":/etc/sysconfig/iptables > /dev/null
+		check_status
+	done
+	
+	echo ""
+	for host in $hosts
+	do
+		echo -n "正在${host}設定開機自動啟用防火牆 ..... " | tee -a deploy.log
+		remote_cmd "$host" "chkconfig iptables on" 
+		check_status
+	done
+	
+	echo ""
+	for host in $hosts
+	do
+	        echo -n "正在啟用${host}的防火牆 ..... " | tee -a deploy.log
+	        remote_cmd "$host" "/etc/init.d/iptables restart" > /dev/null
+	        check_status
+	done
+
+else
+
+	echo ""
+	for host in $hosts
+	do
+	        echo -n "正在${host}設定開機不啟用防火牆 ..... " | tee -a deploy.log
+	        remote_cmd "$host" "chkconfig iptables on"
+	        check_status
+	done
+fi
