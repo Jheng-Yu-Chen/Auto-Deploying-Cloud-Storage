@@ -6,6 +6,8 @@ mkdir -p tmp
 source ./config/config
 source ./script/functions
 
+chmod a+x ./script/* &> /dev/null
+
 #判斷config/hosts檔裡的IP是否為1或3個以上
 if [ $total_hosts -eq 0 ] || [ $total_hosts -eq 2 ]; then
 	echo "至少要1台或3台以上的主機!" | tee -a deploy.log
@@ -30,6 +32,7 @@ ping_host || exit 1
 check_ssh
 
 #SSH不需輸入密碼登入
+echo ""
 echo "您能SSH登入到別台主機而不需輸入密碼嗎?" | tee -a deploy.log
 read -p "輸入'n'設定不需密碼登入 (y/n): " answer
 
