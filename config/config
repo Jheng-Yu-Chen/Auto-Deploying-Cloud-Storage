@@ -1,0 +1,74 @@
+#yes : 啟動防火牆
+#no : 不啟動防火牆
+firewall=yes
+
+#位於此網段的主機才能存取MySQL與DFS, 例如: 192.168.5.0/24
+#use_firewall為no時不必設定。
+network_segment=192.168.5.0/24
+
+#yes : 測試中，自動根據Node的CPU與Memory調整效能
+#no : (預設) 
+perf_tuning=no
+
+ssh_port=22
+
+#OwnCloud語系。
+owncloud_lang=zh_TW
+
+#目前只支援以root身份佈署。
+deploy_user=root
+
+##########################
+#	  Apache	 #
+##########################
+
+#設定443強迫使用HTTPS協定連線
+http_port=443
+
+#設定owncloud網站資料夾名稱
+#例如設定owncloud, 網址為http://url/owncloud
+#請勿設定 / 
+owncloud_dir=owncloud
+
+#設定存放Owncloud網站的根資料夾位置。
+#注意!請勿以 / 結尾。
+http_dir=/var/www/html
+
+##########################
+#     MySQL(Galera)      #
+##########################
+
+#設定MySQL的連線port。
+mysql_port=3306
+
+#設定MySQL的root密碼。
+mysql_pwd='owncloud'
+
+#########################
+#     DFS(GlusterFS)    #
+#########################
+
+#支援三種模式, 分別為:
+#replica(建議) : 資料在所有Node皆會有一份, 優點為High Availablity, 即使只剩一台Node也能運作, 
+#		 缺點為儲存空間以硬碟容量最低的Node為主。
+#stripe : 類似Raid 0, 將所有Node的空間串成一個, 若有一台Node無法運作, 整個Service將無法使用,
+#	  優點為可用儲存空間大。
+#distribute : 將數個資料分散儲存到各個Node, 若有一台Node無法運作, 就會遺失儲存在那台Node上的資料,
+#	       優點為可用儲存空間大。 
+gfs_mode=replica
+
+#Glusterfs Volume的名稱。
+gfs_volume=owncloud
+
+#設定Glusterfs儲存資料的資料夾位置。
+#注意! 在此資料夾新增檔案或目錄, 不會同步到其它Node上，必須在gfs_mount設定的資料夾新增才會同步。 
+gfs_dir=/GFS
+
+#########################
+#       Resources       #
+#########################
+owncloud=http://download.owncloud.org/community/owncloud-5.0.10.tar.bz2
+
+epel_el6=http://mirror01.idc.hinet.net/EPEL/6/i386/epel-release-6-8.noarch.rpm
+
+percona_rpm=http://www.percona.com/downloads/percona-release/percona-release-0.0-1.x86_64.rpm
