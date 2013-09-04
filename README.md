@@ -35,6 +35,9 @@ network_segment=192.168.5.0/24
 
 perf_tuning=no
 
+設定apache的port，如果設定443會強迫使用HTTPS協定連線。
+
+http_port=443
 
 設定MySQL的root密碼。
 
@@ -42,4 +45,7 @@ mysql_pwd='owncloud'
 
 
 #Step 4. 執行deploy.sh
-切換到與deploy.sh相同的目錄，並執行指令 # sh deploy.sh ，完成。
+切換到與deploy.sh相同的目錄，並執行指令 # sh deploy.sh 。
+
+#Step 5. 進入ownCloud設定網頁
+在網址列輸入http://IP.address/owncloud，若http_port設定443則在網址列輸入https://IP.address/owncloud。
