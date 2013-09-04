@@ -25,15 +25,14 @@ if [ "${USER}" != "${deploy_user}" ]; then
 	exit 1
 fi
 	
-#SSH不需輸入密碼登入
-echo "你能SSH到別台主機而不用輸入密碼嗎?" | tee -a deploy.log
-read -p "輸入'n'設定無密碼登入 (y/n): " answer
-
 #檢查主機連線
-echo ""
 ping_host || exit 1
 check_ssh
-	
+
+#SSH不需輸入密碼登入
+echo "您能SSH登入到別台主機而不需輸入密碼嗎?" | tee -a deploy.log
+read -p "輸入'n'設定不需密碼登入 (y/n): " answer
+
 if [ "${answer}" == "n" ]; then
 	./script/shared_ssh_keys
 fi

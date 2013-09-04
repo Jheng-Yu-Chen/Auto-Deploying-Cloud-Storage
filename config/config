@@ -1,13 +1,13 @@
-#yes : 啟動防火牆
-#no : 不啟動防火牆
+#設定是否要啟動防火牆
+#設定值: yes (建議) / no
 firewall=yes
 
 #位於此網段的主機才能存取MySQL與DFS, 例如: 192.168.5.0/24
 #use_firewall為no時不必設定。
 network_segment=192.168.5.0/24
 
-#yes : 測試中，自動根據Node的CPU與Memory調整效能
-#no : (預設) 
+#自動根據Node的CPU與Memory調整效能，還在測試階段，無法保證能夠提升效能
+#設定值: yes / no
 perf_tuning=no
 
 ssh_port=22
@@ -17,6 +17,16 @@ owncloud_lang=zh_TW
 
 #目前只支援以root身份佈署。
 deploy_user=root
+
+##########################
+#     MySQL(Galera)      #
+##########################
+
+#設定MySQL的root密碼。
+mysql_pwd='owncloud'
+
+#設定MySQL的連線port。
+mysql_port=3306
 
 ##########################
 #	  Apache	 #
@@ -34,26 +44,16 @@ owncloud_dir=owncloud
 #注意!請勿以 / 結尾。
 http_dir=/var/www/html
 
-##########################
-#     MySQL(Galera)      #
-##########################
-
-#設定MySQL的連線port。
-mysql_port=3306
-
-#設定MySQL的root密碼。
-mysql_pwd='owncloud'
-
 #########################
 #     DFS(GlusterFS)    #
 #########################
 
 #支援三種模式, 分別為:
-#replica(建議) : 資料在所有Node皆會有一份, 優點為High Availablity, 即使只剩一台Node也能運作, 
+#replica (建議): 資料在所有Node皆會有一份, 優點為High Availablity, 即使只剩一台Node也能運作, 
 #		 缺點為儲存空間以硬碟容量最低的Node為主。
 #stripe : 類似Raid 0, 將所有Node的空間串成一個, 若有一台Node無法運作, 整個Service將無法使用,
 #	  優點為可用儲存空間大。
-#distribute : 將數個資料分散儲存到各個Node, 若有一台Node無法運作, 就會遺失儲存在那台Node上的資料,
+#distribute (不建議): 將數個資料分散儲存到各個Node, 若有一台Node無法運作, 就會遺失儲存在那台Node上的資料,
 #	       優點為可用儲存空間大。 
 gfs_mode=replica
 
